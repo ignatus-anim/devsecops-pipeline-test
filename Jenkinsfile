@@ -53,7 +53,10 @@ pipeline {
         // ── BUILD ─────────────────────────────────────────────
         stage('SBOM Generation') {
             steps {
-                sh "pip install -r requirements.txt --quiet"
+                sh """
+                    python3 -m venv .venv
+                    .venv/bin/pip install -r requirements.txt --quiet
+                """
                 sh "syft . -o cyclonedx-json=${SBOM_REPORT}"
                 writeFile file: 'generate-sbom-report.py', text: '''
 import json
