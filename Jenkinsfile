@@ -19,6 +19,8 @@ pipeline {
 
         SEVERITY_THRESHOLD = 'critical'
         APPROVED_LICENSES  = 'MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense,LGPL-2.1'
+        GRYPE_DB_AUTO_UPDATE        = 'false'
+        GRYPE_DB_MAX_ALLOWED_BUILT_AGE = '2160h'  // 90 days — use cached DB as-is
     }
 
     stages {
@@ -89,7 +91,6 @@ print("SBOM report generated:", len(components), "components")
         stage('Software Composition Analysis') {
             steps {
                 script {
-                    sh "grype db update"
                     def exitCode = sh(
                         script: """
                             grype sbom:${SBOM_REPORT} \\
