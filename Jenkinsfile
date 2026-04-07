@@ -89,6 +89,7 @@ print("SBOM report generated:", len(components), "components")
         stage('Software Composition Analysis') {
             steps {
                 script {
+                    sh "grype db update"
                     def exitCode = sh(
                         script: """
                             grype sbom:${SBOM_REPORT} \\
