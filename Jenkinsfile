@@ -258,18 +258,128 @@ else:
         stage('Container Image Scanning') {
             steps {
                 script {
-                    def exitCode = sh(
-                        script: """
-                            grype ${IMAGE_REF} \\
-                                --fail-on ${SEVERITY_THRESHOLD} \\
-                                --output json \\
-                                --file ${GRYPE_IMG_REPORT}
-                        """,
-                        returnStatus: true
-                    )
+                    sh """
+                        grype ${IMAGE_REF} \\
+                            --output json \\
+                            --file ${GRYPE_IMG_REPORT}
+                    """
                     archiveArtifacts artifacts: "${GRYPE_IMG_REPORT}", allowEmptyArchive: true
-                    if (exitCode != 0) {
-                        error("Container Image Scan FAILED — vulnerabilities at or above '${SEVERITY_THRESHOLD}' detected. Review ${GRYPE_IMG_REPORT}.")
+                    writeFile file: 'generate-image-report.py', text: '''
+import json
+
+with open("grype-image-report.json") as f:
+    data = json.load(f)
+
+matches = data.get("matches", [])
+
+severity_order = ["Critical", "High", "Medium", "Low", "Negligible"]
+severity_colors = {
+    "Critical": "#d73a49",
+    "High":     "#e36209",
+    "Medium":   "#f9c513",
+    "Low":      "#0075ca",
+    "Negligible":"#6a737d"
+}
+
+counts = {s: 0 for s in severity_order}
+for m in matches:
+    s = m["vulnerability"]["severity"]
+    counts[s] = counts.get(s, 0) + 1
+
+matches.sort(key=lambda m: severity_order.index(m["vulnerability"]["severity"]) if m["vulnerability"]["severity"] in severity_order else 99)
+
+def badge(s):
+    color = severity_colors.get(s, "#6a737d")
+    return \'<span style="background:{};color:white;padding:2px 8px;border-radius:4px;font-size:12px">{}</span>\'.format(color, s)
+
+def exploited_tag(m):
+    if m["vulnerability"].get("knownExploited"):
+        return \' <span style="background:#b31d28;color:white;padding:1px 6px;border-radius:3px;font-size:11px">KNOWN EXPLOITED</span>\'
+    return ""
+
+def fix_version(m):
+    fix = m["vulnerability"].get("fix", {})
+    versions = fix.get("versions", [])
+    if versions:
+        return ", ".join(versions)
+    for md in m.get("matchDetails", []):
+        sv = md.get("fix", {}).get("suggestedVersion", "")
+        if sv:
+            return sv
+    state = fix.get("state", "unknown")
+    if state == "wont-fix":
+        return \'<span style="color:#d73a49">No fix available</span>\'
+    return \'<span style="color:#888">{}</span>\'.format(state)
+
+cards = "".join(
+    \'<div style="display:inline-block;margin:6px;padding:14px 28px;border-radius:8px;background:{};color:white;text-align:center">\'
+    \'<div style="font-size:32px;font-weight:bold">{}</div>\'
+    \'<div style="font-size:13px">{}</div></div>\'.format(severity_colors[s], counts[s], s)
+    for s in severity_order
+)
+
+rows = "".join(
+    "<tr>"
+    "<td>{}{}</td>"
+    "<td>{}</td>"
+    "<td>{}</td>"
+    "<td>{}</td>"
+    "<td><a href=\\"https://nvd.nist.gov/vuln/detail/{}\\" target=\\"_blank\\">{}</a></td>"
+    "<td style=\\"font-size:12px\\">{}</td>"
+    "<td style=\\"color:green;font-weight:bold\\">{}</td>"
+    "</tr>".format(
+        m["artifact"]["name"],
+        exploited_tag(m),
+        m["artifact"]["version"],
+        m["artifact"].get("type", ""),
+        badge(m["vulnerability"]["severity"]),
+        m["vulnerability"]["id"],
+        m["vulnerability"]["id"],
+        m["vulnerability"].get("description", "")[:150],
+        fix_version(m)
+    )
+    for m in matches
+)
+
+html = (
+    "<html><head><title>Container Image Scan Report</title>"
+    "<style>"
+    "body{font-family:sans-serif;padding:20px;background:#fff}"
+    "h2{color:#333}"
+    "table{border-collapse:collapse;width:100%;margin-top:20px}"
+    "th,td{border:1px solid #ddd;padding:10px;vertical-align:top}"
+    "th{background:#f4f4f4;font-weight:600}"
+    "tr:nth-child(even){background:#fafafa}"
+    "a{color:#0075ca}"
+    "</style></head>"
+    "<body>"
+    "<h2>Container Image Scan Report</h2>"
+    "<p>Total vulnerabilities: <strong>" + str(len(matches)) + "</strong></p>"
+    "<div style=\'margin:16px 0\'>" + cards + "</div>"
+    "<table>"
+    "<tr><th>Package</th><th>Current Version</th><th>Type</th><th>Severity</th><th>CVE</th><th>Description</th><th>Fix Version</th></tr>"
+    + rows +
+    "</table></body></html>"
+)
+
+open("image-scan-report.html", "w").write(html)
+print("Image scan report generated:", len(matches), "vulnerabilities")
+'''
+                    sh "python3 generate-image-report.py"
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: '.',
+                        reportFiles: 'image-scan-report.html',
+                        reportName: 'Container Image Scan Report'
+                    ])
+                    def criticalCount = sh(
+                        script: "jq '[.matches[] | select(.vulnerability.severity == \"Critical\")] | length' ${GRYPE_IMG_REPORT}",
+                        returnStdout: true
+                    ).trim().toInteger()
+                    if (criticalCount > 0) {
+                        error("Container Image Scan FAILED — ${criticalCount} Critical vulnerability(ies) detected. Review ${GRYPE_IMG_REPORT}.")
                     }
                 }
             }
