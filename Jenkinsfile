@@ -394,20 +394,26 @@ print("Image scan report generated:", len(matches), "vulnerabilities")
         stage('IaC Security Scanning') {
             steps {
                 script {
+                    sh "mkdir -p checkov-results"
                     def exitCode = sh(
                         script: """
                             checkov -d . \\
                                 --framework terraform,cloudformation,kubernetes \\
                                 --output json \\
+                                --output junitxml \\
+                                --output-file-path checkov-results \\
                                 --soft-fail-on LOW,MEDIUM \\
-                                --hard-fail-on HIGH,CRITICAL \\
-                                > ${CHECKOV_REPORT}
+                                --hard-fail-on HIGH,CRITICAL
                         """,
                         returnStatus: true
                     )
+                    // checkov 3.x writes results_checkov.json — copy to our expected name
+                    sh "find checkov-results -name '*.json' -exec cp {} ${CHECKOV_REPORT} \\; 2>/dev/null || true"
                     archiveArtifacts artifacts: "${CHECKOV_REPORT}", allowEmptyArchive: true
+                    // Publish per-check pass/fail in Jenkins Test Results dashboard
+                    junit allowEmptyResults: true, testResults: 'checkov-results/results_junitxml.xml'
                     if (exitCode != 0) {
-                        error("IaC Scanning FAILED — HIGH or CRITICAL misconfigurations detected. Review ${CHECKOV_REPORT}.")
+                        error("IaC Scanning FAILED — HIGH or CRITICAL misconfigurations detected. See Test Results for per-check details.")
                     }
                 }
             }
