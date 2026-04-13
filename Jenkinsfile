@@ -109,20 +109,23 @@ with open("grype-sca-report.json") as f:
 
 matches = data.get("matches", [])
 
-severity_order = ["Critical", "High", "Medium", "Low", "Negligible"]
+severity_order = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"]
 severity_colors = {
-    "Critical": "#d73a49",
-    "High":     "#e36209",
-    "Medium":   "#f9c513",
-    "Low":      "#0075ca",
-    "Negligible":"#6a737d"
+    "Critical":  "#d73a49",
+    "High":      "#e36209",
+    "Medium":    "#f9c513",
+    "Low":       "#0075ca",
+    "Negligible":"#6a737d",
+    "Unknown":   "#959da5"
 }
 
 # count by severity
 counts = {s: 0 for s in severity_order}
 for m in matches:
     s = m["vulnerability"]["severity"]
-    counts[s] = counts.get(s, 0) + 1
+    if s not in counts:
+        s = "Unknown"
+    counts[s] += 1
 
 # sort matches: Critical first
 matches.sort(key=lambda m: severity_order.index(m["vulnerability"]["severity"]) if m["vulnerability"]["severity"] in severity_order else 99)
@@ -272,19 +275,22 @@ with open("grype-image-report.json") as f:
 
 matches = data.get("matches", [])
 
-severity_order = ["Critical", "High", "Medium", "Low", "Negligible"]
+severity_order = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"]
 severity_colors = {
-    "Critical": "#d73a49",
-    "High":     "#e36209",
-    "Medium":   "#f9c513",
-    "Low":      "#0075ca",
-    "Negligible":"#6a737d"
+    "Critical":  "#d73a49",
+    "High":      "#e36209",
+    "Medium":    "#f9c513",
+    "Low":       "#0075ca",
+    "Negligible":"#6a737d",
+    "Unknown":   "#959da5"
 }
 
 counts = {s: 0 for s in severity_order}
 for m in matches:
     s = m["vulnerability"]["severity"]
-    counts[s] = counts.get(s, 0) + 1
+    if s not in counts:
+        s = "Unknown"
+    counts[s] += 1
 
 matches.sort(key=lambda m: severity_order.index(m["vulnerability"]["severity"]) if m["vulnerability"]["severity"] in severity_order else 99)
 
@@ -393,9 +399,9 @@ print("Image scan report generated:", len(matches), "vulnerabilities")
                             checkov -d . \\
                                 --framework terraform,cloudformation,kubernetes \\
                                 --output json \\
-                                --output-file ${CHECKOV_REPORT} \\
                                 --soft-fail-on LOW,MEDIUM \\
-                                --hard-fail-on HIGH,CRITICAL
+                                --hard-fail-on HIGH,CRITICAL \\
+                                > ${CHECKOV_REPORT}
                         """,
                         returnStatus: true
                     )
