@@ -397,7 +397,7 @@ print("Image scan report generated:", len(matches), "vulnerabilities")
                     sh "mkdir -p checkov-results"
                     def exitCode = sh(
                         script: """
-                            checkov -d . \\
+                            /home/linuxbrew/.linuxbrew/bin/checkov -d . \\
                                 --framework terraform,cloudformation,kubernetes \\
                                 --output json \\
                                 --output junitxml \\
@@ -407,10 +407,8 @@ print("Image scan report generated:", len(matches), "vulnerabilities")
                         """,
                         returnStatus: true
                     )
-                    // checkov 3.x writes results_checkov.json — copy to our expected name
                     sh "find checkov-results -name '*.json' -exec cp {} ${CHECKOV_REPORT} \\; 2>/dev/null || true"
                     archiveArtifacts artifacts: "${CHECKOV_REPORT}", allowEmptyArchive: true
-                    // Publish per-check pass/fail in Jenkins Test Results dashboard
                     junit allowEmptyResults: true, testResults: 'checkov-results/results_junitxml.xml'
                     if (exitCode != 0) {
                         error("IaC Scanning FAILED — HIGH or CRITICAL misconfigurations detected. See Test Results for per-check details.")
