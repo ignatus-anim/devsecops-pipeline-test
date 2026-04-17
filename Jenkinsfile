@@ -21,6 +21,12 @@ pipeline {
         APPROVED_LICENSES  = 'MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense,LGPL-2.1'
         GRYPE_DB_AUTO_UPDATE        = 'false'
         GRYPE_DB_MAX_ALLOWED_BUILT_AGE = '2160h'  // 90 days — use cached DB as-is
+
+        // ── Dependency-Track ──────────────────────────────────
+        // 172.17.0.1 = docker0 bridge gateway — reaches the host from
+        // the Jenkins container on vanilla Docker (no Docker Desktop).
+        DTRACK_URL     = 'http://172.17.0.1:8081'
+        DTRACK_API_KEY = credentials('dtrack-api-key')
     }
 
     stages {
@@ -85,6 +91,33 @@ print("SBOM report generated:", len(components), "components")
                     reportFiles: 'sbom-report.html',
                     reportName: 'SBOM Report'
                 ])
+            }
+        }
+
+        stage('Publish SBOM to Dependency-Track') {
+            steps {
+                script {
+                    def httpCode = sh(
+                        script: """
+                            curl -sS -o dtrack-response.json -w "%{http_code}" \\
+                                -X POST ${DTRACK_URL}/api/v1/bom \\
+                                -H "X-Api-Key: ${DTRACK_API_KEY}" \\
+                                -F "projectName=${IMAGE_NAME}" \\
+                                -F "projectVersion=${IMAGE_TAG}" \\
+                                -F "autoCreate=true" \\
+                                -F "bom=@${SBOM_REPORT}" || echo "000"
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    archiveArtifacts artifacts: 'dtrack-response.json', allowEmptyArchive: true
+
+                    if (httpCode.startsWith('2')) {
+                        echo "SBOM uploaded to Dependency-Track: project=${IMAGE_NAME}, version=${IMAGE_TAG} (HTTP ${httpCode})"
+                    } else {
+                        unstable("Dependency-Track upload returned HTTP ${httpCode}. SBOM is still archived in Jenkins — review dtrack-response.json.")
+                    }
+                }
             }
         }
 
