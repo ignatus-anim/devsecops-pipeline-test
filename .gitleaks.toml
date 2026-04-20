@@ -1,0 +1,27 @@
+# ============================================================
+# Gitleaks configuration for the DevSecOps pipeline test repo.
+#
+# Purpose: extend the default gitleaks ruleset but allowlist
+# pipeline-generated artefacts (scan reports, SBOMs, DT upload
+# responses) so Secret Detection does not flag its own output
+# from a previous build when the Jenkins workspace is reused.
+# ============================================================
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Pipeline-generated outputs — not source material, produced by later stages"
+paths = [
+  '''(^|/)dtrack-response\.json$''',
+  '''(^|/)gitleaks-report\.json$''',
+  '''(^|/)grype-.*-report\.json$''',
+  '''(^|/)checkov-report\.json$''',
+  '''(^|/)checkov-results/.*''',
+  '''(^|/)sbom\.cyclonedx\.json$''',
+  '''(^|/)sbom-report\.html$''',
+  '''(^|/)sca-report\.html$''',
+  '''(^|/)image-scan-report\.html$''',
+  '''(^|/)generate-.*-report\.py$''',
+  '''(^|/)license-check\.py$''',
+]

@@ -45,7 +45,7 @@ pipeline {
             steps {
                 script {
                     def exitCode = sh(
-                        script: "gitleaks detect --source . --no-git --report-format json --report-path ${GITLEAKS_REPORT} --exit-code 1",
+                        script: "gitleaks detect --source . --no-git --config .gitleaks.toml --report-format json --report-path ${GITLEAKS_REPORT} --exit-code 1",
                         returnStatus: true
                     )
                     archiveArtifacts artifacts: "${GITLEAKS_REPORT}", allowEmptyArchive: true
