@@ -73,7 +73,12 @@ pipeline {
 import json
 with open("sbom.cyclonedx.json") as f:
     sbom = json.load(f)
-components = sbom.get("components", [])
+
+# Filter out syft file-type components (raw manifest files like
+# requirements.txt). We only want real libraries/applications.
+all_components = sbom.get("components", [])
+components = [c for c in all_components if c.get("type") != "file"]
+
 rows = "".join(
     "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
         c.get("name",""), c.get("version",""), c.get("type",""),
@@ -83,12 +88,15 @@ rows = "".join(
 html = (
     "<html><head><title>SBOM Report</title>"
     "<style>body{font-family:sans-serif;padding:20px}table{border-collapse:collapse;width:100%}"
-    "th,td{border:1px solid #ccc;padding:8px}th{background:#f4f4f4}tr:nth-child(even){background:#fafafa}</style></head>"
-    "<body><h2>SBOM Report</h2><p>Total components: " + str(len(components)) + "</p>"
+    "th,td{border:1px solid #ccc;padding:8px}th{background:#f4f4f4}tr:nth-child(even){background:#fafafa}"
+    ".note{background:#f0f7ff;border-left:4px solid #0075ca;padding:10px 14px;margin:10px 0;font-size:13px}</style></head>"
+    "<body><h2>SBOM Report</h2>"
+    "<div class=\\"note\\">This is a component inventory only. For vulnerabilities and severity, see the <strong>SCA Report</strong> and <strong>Container Image Scan Report</strong> in the sidebar.</div>"
+    "<p>Total components: " + str(len(components)) + "</p>"
     "<table><tr><th>Name</th><th>Version</th><th>Type</th><th>License</th></tr>" + rows + "</table></body></html>"
 )
 open("sbom-report.html", "w").write(html)
-print("SBOM report generated:", len(components), "components")
+print("SBOM report generated:", len(components), "components (filtered", len(all_components) - len(components), "file-type entries)")
 '''
                 sh "python3 generate-sbom-report.py"
                 archiveArtifacts artifacts: "${SBOM_REPORT}"
