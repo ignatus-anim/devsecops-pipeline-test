@@ -59,7 +59,16 @@ pipeline {
         // ── BUILD ─────────────────────────────────────────────
         stage('SBOM Generation') {
             steps {
-                sh "syft . -o cyclonedx-json=${SBOM_REPORT}"
+                sh """
+                    syft dir:. \\
+                        --exclude './.venv/**' \\
+                        --exclude './**/__pycache__/**' \\
+                        --exclude './.git/**' \\
+                        --exclude './node_modules/**' \\
+                        --source-name ${IMAGE_NAME} \\
+                        --source-version ${IMAGE_TAG} \\
+                        -o cyclonedx-json=${SBOM_REPORT}
+                """
                 writeFile file: 'generate-sbom-report.py', text: '''
 import json
 with open("sbom.cyclonedx.json") as f:
