@@ -14,11 +14,14 @@ useDefault = true
 description = "Pipeline-generated outputs — not source material, produced by later stages"
 paths = [
   '''(^|/)dtrack-response\.json$''',
+  '''(^|/)dtrack-container-response\.json$''',
   '''(^|/)gitleaks-report\.json$''',
   '''(^|/)grype-.*-report\.json$''',
   '''(^|/)checkov-report\.json$''',
   '''(^|/)checkov-results/.*''',
   '''(^|/)sbom\.cyclonedx\.json$''',
+  '''(^|/)sbom-source\.cyclonedx\.json$''',
+  '''(^|/)sbom-container\.cyclonedx\.json$''',
   '''(^|/)sbom-report\.html$''',
   '''(^|/)sca-report\.html$''',
   '''(^|/)image-scan-report\.html$''',

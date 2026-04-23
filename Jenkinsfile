@@ -11,7 +11,8 @@ pipeline {
         IMAGE_TAG          = 'latest'
         IMAGE_REF          = "${IMAGE_NAME}:${IMAGE_TAG}"
 
-        SBOM_REPORT        = 'sbom.cyclonedx.json'
+        SBOM_SOURCE_REPORT    = 'sbom-source.cyclonedx.json'
+        SBOM_CONTAINER_REPORT = 'sbom-container.cyclonedx.json'
         GRYPE_SCA_REPORT   = 'grype-sca-report.json'
         GRYPE_IMG_REPORT   = 'grype-image-report.json'
         CHECKOV_REPORT     = 'checkov-report.json'
@@ -67,11 +68,11 @@ pipeline {
                         --exclude './node_modules/**' \\
                         --source-name ${IMAGE_NAME} \\
                         --source-version ${IMAGE_TAG} \\
-                        -o cyclonedx-json=${SBOM_REPORT}
+                        -o cyclonedx-json=${SBOM_SOURCE_REPORT}
                 """
                 writeFile file: 'generate-sbom-report.py', text: '''
 import json
-with open("sbom.cyclonedx.json") as f:
+with open("sbom-source.cyclonedx.json") as f:
     sbom = json.load(f)
 
 # Filter out syft file-type components (raw manifest files like
@@ -99,7 +100,7 @@ open("sbom-report.html", "w").write(html)
 print("SBOM report generated:", len(components), "components (filtered", len(all_components) - len(components), "file-type entries)")
 '''
                 sh "python3 generate-sbom-report.py"
-                archiveArtifacts artifacts: "${SBOM_REPORT}"
+                archiveArtifacts artifacts: "${SBOM_SOURCE_REPORT}"
                 publishHTML([
                     allowMissing: false,
                     alwaysLinkToLastBuild: true,
@@ -119,10 +120,13 @@ print("SBOM report generated:", len(components), "components (filtered", len(all
                             curl -sS -o dtrack-response.json -w "%{http_code}" \\
                                 -X POST ${DTRACK_URL}/api/v1/bom \\
                                 -H "X-Api-Key: ${DTRACK_API_KEY}" \\
-                                -F "projectName=${IMAGE_NAME}" \\
+                                -F "projectName=${IMAGE_NAME}-source" \\
                                 -F "projectVersion=${IMAGE_TAG}" \\
+                                -F "parentName=${IMAGE_NAME}" \\
+                                -F "parentVersion=latest" \\
+                                -F "classifier=LIBRARY" \\
                                 -F "autoCreate=true" \\
-                                -F "bom=@${SBOM_REPORT}" || echo "000"
+                                -F "bom=@${SBOM_SOURCE_REPORT}" || echo "000"
                         """,
                         returnStdout: true
                     ).trim()
@@ -130,7 +134,7 @@ print("SBOM report generated:", len(components), "components (filtered", len(all
                     archiveArtifacts artifacts: 'dtrack-response.json', allowEmptyArchive: true
 
                     if (httpCode.startsWith('2')) {
-                        echo "SBOM uploaded to Dependency-Track: project=${IMAGE_NAME}, version=${IMAGE_TAG} (HTTP ${httpCode})"
+                        echo "Source SBOM uploaded to Dependency-Track: ${IMAGE_NAME}-source@${IMAGE_TAG} (parent=${IMAGE_NAME}, HTTP ${httpCode})"
                     } else {
                         unstable("Dependency-Track upload returned HTTP ${httpCode}. SBOM is still archived in Jenkins — review dtrack-response.json.")
                     }
@@ -143,7 +147,7 @@ print("SBOM report generated:", len(components), "components (filtered", len(all
                 script {
                     def exitCode = sh(
                         script: """
-                            grype sbom:${SBOM_REPORT} \\
+                            grype sbom:${SBOM_SOURCE_REPORT} \\
                                 --fail-on ${SEVERITY_THRESHOLD} \\
                                 --output json \\
                                 --file ${GRYPE_SCA_REPORT}
@@ -278,7 +282,7 @@ print("SCA report generated:", len(matches), "vulnerabilities")
                     writeFile file: 'license-check.py', text: """
 import json, sys
 approved = set("${APPROVED_LICENSES}".split(","))
-with open("${SBOM_REPORT}") as f:
+with open("${SBOM_SOURCE_REPORT}") as f:
     sbom = json.load(f)
 violations = []
 for component in sbom.get("components", []):
@@ -305,6 +309,43 @@ else:
         stage('Build Container Image') {
             steps {
                 sh "docker build -t ${IMAGE_REF} ."
+            }
+        }
+
+        stage('Generate Container SBOM') {
+            steps {
+                sh "syft ${IMAGE_REF} -o cyclonedx-json=${SBOM_CONTAINER_REPORT}"
+                archiveArtifacts artifacts: "${SBOM_CONTAINER_REPORT}"
+            }
+        }
+
+        stage('Publish Container SBOM to Dependency-Track') {
+            steps {
+                script {
+                    def httpCode = sh(
+                        script: """
+                            curl -sS -o dtrack-container-response.json -w "%{http_code}" \\
+                                -X POST ${DTRACK_URL}/api/v1/bom \\
+                                -H "X-Api-Key: ${DTRACK_API_KEY}" \\
+                                -F "projectName=${IMAGE_NAME}-container" \\
+                                -F "projectVersion=${IMAGE_TAG}" \\
+                                -F "parentName=${IMAGE_NAME}" \\
+                                -F "parentVersion=latest" \\
+                                -F "classifier=CONTAINER" \\
+                                -F "autoCreate=true" \\
+                                -F "bom=@${SBOM_CONTAINER_REPORT}" || echo "000"
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    archiveArtifacts artifacts: 'dtrack-container-response.json', allowEmptyArchive: true
+
+                    if (httpCode.startsWith('2')) {
+                        echo "Container SBOM uploaded to Dependency-Track: ${IMAGE_NAME}-container@${IMAGE_TAG} (parent=${IMAGE_NAME}, HTTP ${httpCode})"
+                    } else {
+                        unstable("Container SBOM upload to Dependency-Track returned HTTP ${httpCode}. SBOM is still archived in Jenkins — review dtrack-container-response.json.")
+                    }
+                }
             }
         }
 
