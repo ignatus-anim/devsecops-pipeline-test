@@ -314,7 +314,22 @@ else:
 
         stage('Generate Container SBOM') {
             steps {
-                sh "syft ${IMAGE_REF} -o cyclonedx-json=${SBOM_CONTAINER_REPORT}"
+                sh """
+                    syft docker:${IMAGE_REF} \\
+                        --scope all-layers \\
+                        --source-name ${IMAGE_NAME}-container \\
+                        --source-version ${IMAGE_TAG} \\
+                        -o cyclonedx-json=${SBOM_CONTAINER_REPORT}
+
+                    echo '=== Container SBOM — component breakdown by type ==='
+                    jq -r '.components | group_by(.type) | map({type: .[0].type, count: length}) | .[]' ${SBOM_CONTAINER_REPORT} || true
+
+                    echo '=== Container SBOM — component breakdown by ecosystem (purl prefix) ==='
+                    jq -r '[.components[].purl // empty | split("/")[0]] | group_by(.) | map({purl_type: .[0], count: length}) | .[]' ${SBOM_CONTAINER_REPORT} || true
+
+                    echo '=== Total components:'
+                    jq '.components | length' ${SBOM_CONTAINER_REPORT}
+                """
                 archiveArtifacts artifacts: "${SBOM_CONTAINER_REPORT}"
             }
         }
