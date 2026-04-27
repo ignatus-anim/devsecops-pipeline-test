@@ -30,8 +30,12 @@ pipeline {
         DTRACK_API_KEY = credentials('dtrack-api-key')
 
         // ── DefectDojo ────────────────────────────────────────
-        DEFECTDOJO_URL       = 'http://172.17.0.1:8084'
-        DEFECTDOJO_API_TOKEN = credentials('DEFECTDOJO_API_TOKEN')
+        DEFECTDOJO_URL          = 'http://172.17.0.1:8084'
+        DEFECTDOJO_API_TOKEN    = credentials('DEFECTDOJO_API_TOKEN')
+        // Must match an existing product-type in DefectDojo (default seed
+        // values: "Research and Development", "Internal", "Customer").
+        // Required for auto_create_context to bucket new products.
+        DEFECTDOJO_PRODUCT_TYPE = 'Research and Development'
     }
 
     stages {
@@ -120,18 +124,18 @@ print("SBOM report generated:", len(components), "components (filtered", len(all
             steps {
                 script {
                     def httpCode = sh(
-                        script: """
-                            curl -sS -o dtrack-response.json -w "%{http_code}" \\
-                                -X POST ${DTRACK_URL}/api/v1/bom \\
-                                -H "X-Api-Key: ${DTRACK_API_KEY}" \\
-                                -F "projectName=${IMAGE_NAME}-source" \\
-                                -F "projectVersion=${IMAGE_TAG}" \\
-                                -F "parentName=${IMAGE_NAME}" \\
-                                -F "parentVersion=latest" \\
-                                -F "classifier=LIBRARY" \\
-                                -F "autoCreate=true" \\
+                        script: '''
+                            curl -sS -o dtrack-response.json -w "%{http_code}" \
+                                -X POST "${DTRACK_URL}/api/v1/bom" \
+                                -H "X-Api-Key: ${DTRACK_API_KEY}" \
+                                -F "projectName=${IMAGE_NAME}-source" \
+                                -F "projectVersion=${IMAGE_TAG}" \
+                                -F "parentName=${IMAGE_NAME}" \
+                                -F "parentVersion=latest" \
+                                -F "classifier=LIBRARY" \
+                                -F "autoCreate=true" \
                                 -F "bom=@${SBOM_SOURCE_REPORT}" || echo "000"
-                        """,
+                        ''',
                         returnStdout: true
                     ).trim()
 
@@ -342,18 +346,18 @@ else:
             steps {
                 script {
                     def httpCode = sh(
-                        script: """
-                            curl -sS -o dtrack-container-response.json -w "%{http_code}" \\
-                                -X POST ${DTRACK_URL}/api/v1/bom \\
-                                -H "X-Api-Key: ${DTRACK_API_KEY}" \\
-                                -F "projectName=${IMAGE_NAME}-container" \\
-                                -F "projectVersion=${IMAGE_TAG}" \\
-                                -F "parentName=${IMAGE_NAME}" \\
-                                -F "parentVersion=latest" \\
-                                -F "classifier=CONTAINER" \\
-                                -F "autoCreate=true" \\
+                        script: '''
+                            curl -sS -o dtrack-container-response.json -w "%{http_code}" \
+                                -X POST "${DTRACK_URL}/api/v1/bom" \
+                                -H "X-Api-Key: ${DTRACK_API_KEY}" \
+                                -F "projectName=${IMAGE_NAME}-container" \
+                                -F "projectVersion=${IMAGE_TAG}" \
+                                -F "parentName=${IMAGE_NAME}" \
+                                -F "parentVersion=latest" \
+                                -F "classifier=CONTAINER" \
+                                -F "autoCreate=true" \
                                 -F "bom=@${SBOM_CONTAINER_REPORT}" || echo "000"
-                        """,
+                        ''',
                         returnStdout: true
                     ).trim()
 
@@ -371,42 +375,48 @@ else:
         stage('Publish SBOMs to DefectDojo') {
             steps {
                 script {
+                    // Single-quoted Groovy string → shell does the variable expansion at runtime.
+                    // This keeps the API token out of the rendered command line (no Groovy
+                    // interpolation warning) and out of process listings.
+
                     // Source SBOM → product=<image>, engagement=<image>-source
                     def sourceCode = sh(
-                        script: """
-                            curl -sS -o defectdojo-source-response.json -w "%{http_code}" \\
-                                -X POST ${DEFECTDOJO_URL}/api/v2/import-scan/ \\
-                                -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \\
-                                -F "scan_type=CycloneDX Scan" \\
-                                -F "file=@${SBOM_SOURCE_REPORT}" \\
-                                -F "product_name=${IMAGE_NAME}" \\
-                                -F "engagement_name=${IMAGE_NAME}-source" \\
-                                -F "version=${IMAGE_TAG}" \\
-                                -F "auto_create_context=true" \\
-                                -F "active=true" \\
-                                -F "verified=false" \\
+                        script: '''
+                            curl -sS -o defectdojo-source-response.json -w "%{http_code}" \
+                                -X POST "${DEFECTDOJO_URL}/api/v2/import-scan/" \
+                                -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \
+                                -F "scan_type=CycloneDX Scan" \
+                                -F "file=@${SBOM_SOURCE_REPORT}" \
+                                -F "product_type_name=${DEFECTDOJO_PRODUCT_TYPE}" \
+                                -F "product_name=${IMAGE_NAME}" \
+                                -F "engagement_name=${IMAGE_NAME}-source" \
+                                -F "version=${IMAGE_TAG}" \
+                                -F "auto_create_context=true" \
+                                -F "active=true" \
+                                -F "verified=false" \
                                 -F "minimum_severity=Info" || echo "000"
-                        """,
+                        ''',
                         returnStdout: true
                     ).trim()
                     archiveArtifacts artifacts: 'defectdojo-source-response.json', allowEmptyArchive: true
 
                     // Container SBOM → same product, engagement=<image>-container
                     def containerCode = sh(
-                        script: """
-                            curl -sS -o defectdojo-container-response.json -w "%{http_code}" \\
-                                -X POST ${DEFECTDOJO_URL}/api/v2/import-scan/ \\
-                                -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \\
-                                -F "scan_type=CycloneDX Scan" \\
-                                -F "file=@${SBOM_CONTAINER_REPORT}" \\
-                                -F "product_name=${IMAGE_NAME}" \\
-                                -F "engagement_name=${IMAGE_NAME}-container" \\
-                                -F "version=${IMAGE_TAG}" \\
-                                -F "auto_create_context=true" \\
-                                -F "active=true" \\
-                                -F "verified=false" \\
+                        script: '''
+                            curl -sS -o defectdojo-container-response.json -w "%{http_code}" \
+                                -X POST "${DEFECTDOJO_URL}/api/v2/import-scan/" \
+                                -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \
+                                -F "scan_type=CycloneDX Scan" \
+                                -F "file=@${SBOM_CONTAINER_REPORT}" \
+                                -F "product_type_name=${DEFECTDOJO_PRODUCT_TYPE}" \
+                                -F "product_name=${IMAGE_NAME}" \
+                                -F "engagement_name=${IMAGE_NAME}-container" \
+                                -F "version=${IMAGE_TAG}" \
+                                -F "auto_create_context=true" \
+                                -F "active=true" \
+                                -F "verified=false" \
                                 -F "minimum_severity=Info" || echo "000"
-                        """,
+                        ''',
                         returnStdout: true
                     ).trim()
                     archiveArtifacts artifacts: 'defectdojo-container-response.json', allowEmptyArchive: true
