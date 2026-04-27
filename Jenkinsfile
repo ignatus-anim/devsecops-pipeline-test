@@ -28,6 +28,10 @@ pipeline {
         // the Jenkins container on vanilla Docker (no Docker Desktop).
         DTRACK_URL     = 'http://172.17.0.1:8081'
         DTRACK_API_KEY = credentials('dtrack-api-key')
+
+        // ── DefectDojo ────────────────────────────────────────
+        DEFECTDOJO_URL       = 'http://172.17.0.1:8084'
+        DEFECTDOJO_API_TOKEN = credentials('DEFECTDOJO_API_TOKEN')
     }
 
     stages {
@@ -359,6 +363,58 @@ else:
                         echo "Container SBOM uploaded to Dependency-Track: ${IMAGE_NAME}-container@${IMAGE_TAG} (parent=${IMAGE_NAME}, HTTP ${httpCode})"
                     } else {
                         unstable("Container SBOM upload to Dependency-Track returned HTTP ${httpCode}. SBOM is still archived in Jenkins — review dtrack-container-response.json.")
+                    }
+                }
+            }
+        }
+
+        stage('Publish SBOMs to DefectDojo') {
+            steps {
+                script {
+                    // Source SBOM → product=<image>, engagement=<image>-source
+                    def sourceCode = sh(
+                        script: """
+                            curl -sS -o defectdojo-source-response.json -w "%{http_code}" \\
+                                -X POST ${DEFECTDOJO_URL}/api/v2/import-scan/ \\
+                                -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \\
+                                -F "scan_type=CycloneDX Scan" \\
+                                -F "file=@${SBOM_SOURCE_REPORT}" \\
+                                -F "product_name=${IMAGE_NAME}" \\
+                                -F "engagement_name=${IMAGE_NAME}-source" \\
+                                -F "version=${IMAGE_TAG}" \\
+                                -F "auto_create_context=true" \\
+                                -F "active=true" \\
+                                -F "verified=false" \\
+                                -F "minimum_severity=Info" || echo "000"
+                        """,
+                        returnStdout: true
+                    ).trim()
+                    archiveArtifacts artifacts: 'defectdojo-source-response.json', allowEmptyArchive: true
+
+                    // Container SBOM → same product, engagement=<image>-container
+                    def containerCode = sh(
+                        script: """
+                            curl -sS -o defectdojo-container-response.json -w "%{http_code}" \\
+                                -X POST ${DEFECTDOJO_URL}/api/v2/import-scan/ \\
+                                -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \\
+                                -F "scan_type=CycloneDX Scan" \\
+                                -F "file=@${SBOM_CONTAINER_REPORT}" \\
+                                -F "product_name=${IMAGE_NAME}" \\
+                                -F "engagement_name=${IMAGE_NAME}-container" \\
+                                -F "version=${IMAGE_TAG}" \\
+                                -F "auto_create_context=true" \\
+                                -F "active=true" \\
+                                -F "verified=false" \\
+                                -F "minimum_severity=Info" || echo "000"
+                        """,
+                        returnStdout: true
+                    ).trim()
+                    archiveArtifacts artifacts: 'defectdojo-container-response.json', allowEmptyArchive: true
+
+                    if (sourceCode.startsWith('2') && containerCode.startsWith('2')) {
+                        echo "Both SBOMs published to DefectDojo product=${IMAGE_NAME} (source=HTTP ${sourceCode}, container=HTTP ${containerCode})"
+                    } else {
+                        unstable("DefectDojo upload partial — source=HTTP ${sourceCode}, container=HTTP ${containerCode}. SBOMs still archived in Jenkins; review defectdojo-*-response.json.")
                     }
                 }
             }
